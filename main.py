@@ -30,6 +30,7 @@ PARAMS = {
     "reserve_min": 0.1,  # never give out more than 1 - reserve_min of a place
     "horizon_step": 3,    # evaluate every n-th slot of the window
     "beta": 0.45,         # momentum: how far a game's recent trend shifts its starting place (log scale)
+    "gamma": 1.0,        # momentum from the player-count growth over the lookback (log scale)
     "lookback": 24.0,    # hours back for the trend
     "new_prev": 130.0,   # place assumed for a game that was not on the chart at the lookback read
     "tau_cap": 2.0,
@@ -98,7 +99,8 @@ def effective_ranks(reads, rank_of, i, p):
     a = reads[i]
     cur = rank_of[i]
     beta = p["beta"]
-    if beta == 0.0:
+    gamma = p.get("gamma", 0.0)
+    if beta == 0.0 and gamma == 0.0:
         return dict(cur)
     # read closest to lookback hours earlier (within a tolerance)
     target = a["t"] - p["lookback"]
@@ -118,7 +120,14 @@ def effective_ranks(reads, rank_of, i, p):
         pr = prev.get(u, p["new_prev"])
         tau = math.log(pr) - math.log(r)  # > 0: moved up
         tau = max(-p["tau_cap"], min(p["tau_cap"], tau))
-        out[u] = max(1.0, r * math.exp(-beta * tau))
+        shift = beta * tau
+        if gamma != 0.0:
+            # growth of the player count over the lookback: a growing game is likelier to climb
+            pn = a["playing"].get(u)
+            pp = reads[best]["playing"].get(u) if best is not None and prev is not None else None
+            if pn and pp and pn > 0 and pp > 0:
+                shift += gamma * max(-p["tau_cap"], min(p["tau_cap"], math.log(pn / pp)))
+        out[u] = max(1.0, r * math.exp(-shift))
     return out
 
 
